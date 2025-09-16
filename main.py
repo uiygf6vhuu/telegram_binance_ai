@@ -13,7 +13,7 @@ import os
 import math
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
-from sklearn.linear_model import SGDClassifier
+from sklearn.linear_ai_model import SGDClassifier
 import joblib
 from train_ai import train_from_binance
 # Cấu hình logging chi tiết
@@ -527,24 +527,24 @@ class IndicatorBot:
 
         # ==== AI online learning ====
         self.classes = np.array([-1, 0, 1])  # SELL, NEUTRAL, BUY
-        model_path = f"models/ai_{self.symbol}.pkl"
-        os.makedirs("models", exist_ok=True)
+        ai_model_path = f"ai_models/ai_{self.symbol}.pkl"
+        os.makedirs("ai_models", exist_ok=True)
         
-        if os.path.exists(model_path):
-            # Load model đã có
-            self.ai_model = joblib.load(model_path)
+        if os.path.exists(ai_model_path):
+            # Load ai_model đã có
+            self.ai_model = joblib.load(ai_model_path)
         else:
             # Nếu chưa có thì train mới
-            print(f"⚡ Chưa có model cho {self.symbol}, đang train...")
+            print(f"⚡ Chưa có ai_model cho {self.symbol}, đang train...")
             train_from_binance(self.symbol)  # train_ai sẽ tạo ai_model.pkl
         
-            # Đổi tên file vừa train thành model riêng cho symbol
+            # Đổi tên file vừa train thành ai_model riêng cho symbol
             if os.path.exists("ai_model.pkl"):
-                os.rename("ai_model.pkl", model_path)
+                os.rename("ai_model.pkl", ai_model_path)
         
-            # Load model vừa tạo
-            self.ai_model = joblib.load(model_path)
-            print(f"✅ Model cho {self.symbol} đã được tạo và load")
+            # Load ai_model vừa tạo
+            self.ai_model = joblib.load(ai_model_path)
+            print(f"✅ ai_model cho {self.symbol} đã được tạo và load")
 
         # Phần khởi tạo khác giữ nguyên
         self.check_position_status()
@@ -784,11 +784,11 @@ class IndicatorBot:
             self.ai_model.partial_fit(features, [label])
     
             # Lưu ai_model lại
-            joblib.dump(self.ai_model, f"models/ai_{self.symbol}.pkl")
-            self.log(f"🤖 AI model đã học thêm (label={label})")
+            joblib.dump(self.ai_model, f"ai_models/ai_{self.symbol}.pkl")
+            self.log(f"🤖 AI ai_model đã học thêm (label={label})")
     
         except Exception as e:
-            self.log(f"Lỗi update_model: {str(e)}")
+            self.log(f"Lỗi update_ai_model: {str(e)}")
     
 
     def _run(self):
@@ -1466,6 +1466,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
