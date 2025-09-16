@@ -15,7 +15,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from sklearn.linear_model import SGDClassifier
 import joblib
-
+from train_ai import train_from_binance
 # Cấu hình logging chi tiết
 logging.basicConfig(
     level=logging.INFO,
@@ -528,24 +528,24 @@ class IndicatorBot:
         # ==== AI online learning ====
         self.classes = np.array([-1, 0, 1])  # SELL, NEUTRAL, BUY
         model_path = f"models/ai_{self.symbol}.pkl"
-
+        os.makedirs("models", exist_ok=True)
+        
         if os.path.exists(model_path):
-            try:
-                if os.path.exists(model_path):
-                    self.ai_model = joblib.load(model_path)
-                    self.log(f"✅ Load AI model riêng cho {self.symbol}")
-                else:
-                    self.ai_model = SGDClassifier(loss="log_loss", max_iter=5)
-                    self.ai_model.partial_fit(np.zeros((1, 5)), [0], classes=self.classes)
-                    self.log(f"⚠️ Chưa có AI model cho {self.symbol}, tạo mới online")
-            except Exception as e:
-                self.ai_model = SGDClassifier(loss="log_loss", max_iter=5)
-                self.ai_model.partial_fit(np.zeros((1, 5)), [0], classes=self.classes)
-                self.log(f"⚠️ Load model thất bại, tạo mới: {str(e)}")
+            # Load model đã có
+            self.model = joblib.load(model_path)
         else:
-            self.ai_model = SGDClassifier(loss="log_loss", max_iter=5)
-            self.ai_model.partial_fit(np.zeros((1, 5)), [0], classes=self.classes)
-            self.log("⚠️ Chưa có AI model, tạo mới online")
+            # Nếu chưa có thì train mới
+            print(f"⚡ Chưa có model cho {self.symbol}, đang train...")
+            train_from_binance(self.symbol)  # train_ai sẽ tạo ai_model.pkl
+        
+            # Đổi tên file vừa train thành model riêng cho symbol
+            if os.path.exists("ai_model.pkl"):
+                os.rename("ai_model.pkl", model_path)
+        
+            # Load model vừa tạo
+            self.model = joblib.load(model_path)
+            print(f"✅ Model cho {self.symbol} đã được tạo và load")
+
         # Phần khởi tạo khác giữ nguyên
         self.check_position_status()
         self.status = "waiting"
@@ -1466,6 +1466,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
