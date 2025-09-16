@@ -13,6 +13,8 @@ import os
 import math
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
+from sklearn.linear_model import SGDClassifier
+import joblib
 
 # Cấu hình logging chi tiết
 logging.basicConfig(
@@ -523,19 +525,22 @@ class IndicatorBot:
         self.indicator = indicator
         self.ws_manager = ws_manager
 
-        # ==== Load AI model ====
+        # ==== AI online learning ====
+        self.classes = np.array([-1, 0, 1])  # SELL, NEUTRAL, BUY
         model_path = "ai_model.pkl"
+
         if os.path.exists(model_path):
             try:
                 self.ai_model = joblib.load(model_path)
-                self.log("✅ AI model đã load thành công")
+                self.log("✅ AI model đã load thành công (online)")
             except Exception as e:
-                self.ai_model = None
-                self.log(f"⚠️ Không load được AI model: {str(e)}")
+                self.ai_model = SGDClassifier(loss="log_loss", max_iter=5)
+                self.ai_model.partial_fit(np.zeros((1, 5)), [0], classes=self.classes)
+                self.log(f"⚠️ Load model thất bại, tạo mới: {str(e)}")
         else:
-            self.ai_model = None
-            self.log("⚠️ Chưa có AI model, bot chỉ dùng logic cơ bản")
-
+            self.ai_model = SGDClassifier(loss="log_loss", max_iter=5)
+            self.ai_model.partial_fit(np.zeros((1, 5)), [0], classes=self.classes)
+            self.log("⚠️ Chưa có AI model, tạo mới online")
         # Phần khởi tạo khác giữ nguyên
         self.check_position_status()
         self.status = "waiting"
@@ -712,53 +717,41 @@ class IndicatorBot:
     # ====== GET SIGNAL ======
     def get_signal(self):
         """
-        Sinh tín hiệu bằng AI (XGBoost) + lọc EMA trend.
-        Trả về: "BUY", "SELL" hoặc None
+        Dùng AI online learning để dự đoán tín hiệu
         """
         try:
             data = self._fetch_klines(interval="5m", limit=100)
             if not data or len(data) < 50:
                 return None
-
+    
             closes = [float(k[4]) for k in data]
             highs  = [float(k[2]) for k in data]
             lows   = [float(k[3]) for k in data]
             volumes = [float(k[5]) for k in data]
-
-            # ===== Tính chỉ báo =====
+    
             rsi = self._calc_rsi_series(closes, period=14)[-1]
             ema_fast = self._ema_last(closes, 9)
             ema_slow = self._ema_last(closes, 21)
             atr = self._atr(highs, lows, closes)
-
-            if rsi is None or ema_fast is None or ema_slow is None or atr is None:
+    
+            if None in [rsi, ema_fast, ema_slow, atr]:
                 return None
-
-            # ===== Tạo feature cho AI =====
+    
             features = np.array([rsi, ema_fast, ema_slow, atr, volumes[-1]]).reshape(1, -1)
-
-            # ===== Dự đoán với AI =====
-            if self.ai_model:
-                try:
-                    signal = self.ai_model.predict(features)[0]  # "BUY"/"SELL"/"NEUTRAL"
-                except Exception as e:
-                    self.log(f"Lỗi AI predict: {str(e)}")
-                    return None
-            else:
-                # fallback nếu chưa có AI model
-                signal = "BUY" if ema_fast > ema_slow else "SELL"
-
-            # ===== Lọc tín hiệu theo EMA trend =====
-            if signal == "BUY" and ema_fast < ema_slow:
-                return None
-            if signal == "SELL" and ema_fast > ema_slow:
-                return None
-
-            return signal if signal in ["BUY", "SELL"] else None
-
-        except Exception as e:
-            self.log(f"Lỗi get_signal AI: {str(e)}")
+    
+            # AI dự đoán
+            signal = self.ai_model.predict(features)[0]  # -1 SELL, 0 NEUTRAL, 1 BUY
+    
+            if signal == 1 and ema_fast > ema_slow:
+                return "BUY"
+            if signal == -1 and ema_fast < ema_slow:
+                return "SELL"
             return None
+    
+        except Exception as e:
+            self.log(f"Lỗi get_signal AI online: {str(e)}")
+            return None
+
 
     def get_ema_crossover_signal(self, prices, short_period=9, long_period=21):
         if len(prices) < long_period:
@@ -780,6 +773,48 @@ class IndicatorBot:
             return "SELL"
         else:
             return None
+
+    def update_model(self, data):
+        """
+        Học thêm từ dữ liệu nến mới:
+        - Tính RSI, EMA, ATR, Volume
+        - Tạo nhãn theo biến động giá trong 3 nến tới
+        - Cập nhật model bằng partial_fit
+        - Lưu lại model vào file
+        """
+        try:
+            closes = [float(k[4]) for k in data]
+            highs  = [float(k[2]) for k in data]
+            lows   = [float(k[3]) for k in data]
+            volumes = [float(k[5]) for k in data]
+    
+            rsi = self._calc_rsi_series(closes, 14)[-1]
+            ema_fast = self._ema_last(closes, 9)
+            ema_slow = self._ema_last(closes, 21)
+            atr = self._atr(highs, lows, closes)
+    
+            if None in [rsi, ema_fast, ema_slow, atr]:
+                return
+    
+            features = np.array([rsi, ema_fast, ema_slow, atr, volumes[-1]]).reshape(1, -1)
+    
+            # Nhãn dựa trên biến động giá 3 nến tới
+            future_return = closes[-1] / closes[-4] - 1
+            label = 0
+            if future_return > 0.003:
+                label = 1
+            elif future_return < -0.003:
+                label = -1
+    
+            self.ai_model.partial_fit(features, [label])
+    
+            # Lưu model lại
+            joblib.dump(self.ai_model, "ai_model.pkl")
+            self.log(f"🤖 AI model đã học thêm (label={label})")
+    
+        except Exception as e:
+            self.log(f"Lỗi update_model: {str(e)}")
+    
 
     def _run(self):
         """Luồng chính quản lý bot với kiểm soát lỗi chặt chẽ"""
@@ -1456,6 +1491,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
