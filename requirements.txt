@@ -1,0 +1,6 @@
+numpy==1.26.4
+requests==2.31.0
+websocket-client==1.8.0
+xgboost==2.0.3
+scikit-learn==1.4.2
+joblib==1.4.0
