@@ -221,6 +221,14 @@ def set_leverage(symbol, lev):
         logger.error(f"Lỗi thiết lập đòn bẩy: {str(e)}")
         send_telegram(f"⚠️ <b>LỖI ĐÒN BẨY:</b> {symbol} - {str(e)}")
     return False
+def get_volume(symbol):
+    try:
+        url = f"https://fapi.binance.com/fapi/v1/ticker/24hr?symbol={symbol.upper()}"
+        data = requests.get(url, timeout=10).json()
+        return float(data["volume"])
+    except Exception as e:
+        logger.error(f"Lỗi lấy volume {symbol}: {e}")
+        return 0.0
 
 def get_balance():
     try:
@@ -712,7 +720,7 @@ class IndicatorBot:
     
             if None in [rsi, ema_fast, ema_slow, atr]:
                 return None
-    
+            volume = get_volume(self.symbol)
             features = pd.DataFrame([[rsi, ema_fast, ema_slow, atr, volume]],
                         columns=["RSI","EMA9","EMA21","ATR","volume"])
     
@@ -1468,6 +1476,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
