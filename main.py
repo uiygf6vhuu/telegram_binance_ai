@@ -683,37 +683,7 @@ class IndicatorBot:
         return signal
 
     # ====== LOGIC ĐỆ QUY (gọn) ======
-    def _recursive_logic(self, states, idx=2):
-        if idx >= len(states):
-            return None
-
-        prev2, prev1, curr = states[idx-2], states[idx-1], states[idx]
-        decision = None
-
-        # BUY rules
-        if prev2 == "UP_STRONG" and prev1 == "UP_STRONG" and curr.startswith("UP"):
-            decision = "BUY"
-        elif prev1 == "DOWN_OVERSOLD" or curr == "DOWN_OVERSOLD":
-            decision = "BUY"
-        elif prev1.startswith("DOWN") and curr == "UP_STRONG":
-            decision = "BUY"
-
-        # SELL rules
-        elif prev2 == "DOWN_STRONG" and prev1 == "DOWN_STRONG" and curr.startswith("DOWN"):
-            decision = "SELL"
-        elif prev1 == "UP_OVERBOUGHT" or curr == "UP_OVERBOUGHT":
-            decision = "SELL"
-        elif prev1.startswith("UP") and curr == "DOWN_STRONG":
-            decision = "SELL"
-
-        # SIDEWAY
-        elif prev1 == "NEUTRAL" and curr == "NEUTRAL":
-            decision = None
-
-        # Đệ quy tiếp
-        next_decision = self._recursive_logic(states, idx + 1)
-        return next_decision if next_decision else decision
-
+    
     # ====== GET SIGNAL ======
     def get_signal(self):
         """
@@ -1491,6 +1461,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
