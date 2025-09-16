@@ -527,12 +527,17 @@ class IndicatorBot:
 
         # ==== AI online learning ====
         self.classes = np.array([-1, 0, 1])  # SELL, NEUTRAL, BUY
-        model_path = "ai_model.pkl"
+        model_path = f"models/ai_{self.symbol}.pkl"
 
         if os.path.exists(model_path):
             try:
-                self.ai_model = joblib.load(model_path)
-                self.log("✅ AI model đã load thành công (online)")
+                if os.path.exists(model_path):
+                    self.ai_model = joblib.load(model_path)
+                    self.log(f"✅ Load AI model riêng cho {self.symbol}")
+                else:
+                    self.ai_model = SGDClassifier(loss="log_loss", max_iter=5)
+                    self.ai_model.partial_fit(np.zeros((1, 5)), [0], classes=self.classes)
+                    self.log(f"⚠️ Chưa có AI model cho {self.symbol}, tạo mới online")
             except Exception as e:
                 self.ai_model = SGDClassifier(loss="log_loss", max_iter=5)
                 self.ai_model.partial_fit(np.zeros((1, 5)), [0], classes=self.classes)
@@ -779,7 +784,7 @@ class IndicatorBot:
             self.ai_model.partial_fit(features, [label])
     
             # Lưu model lại
-            joblib.dump(self.ai_model, "ai_model.pkl")
+            joblib.dump(self.ai_model, f"models/ai_{self.symbol}.pkl")
             self.log(f"🤖 AI model đã học thêm (label={label})")
     
         except Exception as e:
@@ -1461,6 +1466,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
