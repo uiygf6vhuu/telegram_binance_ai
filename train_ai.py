@@ -1,9 +1,9 @@
 import pandas as pd
 import numpy as np
-from xgboost import XGBClassifier
+import requests
+from sklearn.linear_model import SGDClassifier
 from sklearn.model_selection import train_test_split
 import joblib
-import requests
 
 # ===== Lấy dữ liệu nến từ Binance =====
 def fetch_klines(symbol="BTCUSDT", interval="5m", limit=1000):
@@ -22,6 +22,7 @@ def fetch_klines(symbol="BTCUSDT", interval="5m", limit=1000):
     df["volume"] = df["volume"].astype(float)
     return df
 
+# ===== RSI =====
 def calc_rsi(series, period=14):
     delta = series.diff()
     up = delta.clip(lower=0)
@@ -32,9 +33,11 @@ def calc_rsi(series, period=14):
     rsi = 100 - (100/(1+rs))
     return rsi
 
+# ===== EMA =====
 def calc_ema(series, period):
     return series.ewm(span=period, adjust=False).mean()
 
+# ===== ATR =====
 def calc_atr(df, period=14):
     high_low = df["high"] - df["low"]
     high_close = (df["high"] - df["close"].shift()).abs()
@@ -50,32 +53,28 @@ df["EMA9"] = calc_ema(df["close"], 9)
 df["EMA21"] = calc_ema(df["close"], 21)
 df["ATR"] = calc_atr(df, 14)
 
+# Label: dự đoán biến động giá 3 nến tới
 future_return = df["close"].shift(-3) / df["close"] - 1
 df["label"] = 0
-df.loc[future_return > 0.003, "label"] = 1   # BUY
-df.loc[future_return < -0.003, "label"] = -1 # SELL
+df.loc[future_return > 0.003, "label"] = 1    # BUY
+df.loc[future_return < -0.003, "label"] = -1  # SELL
 
 df = df.dropna()
+
 X = df[["RSI","EMA9","EMA21","ATR","volume"]]
 y = df["label"]
 
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
 
-# ===== Train model =====
-model = XGBClassifier(
-    max_depth=4,
-    n_estimators=200,
-    learning_rate=0.05,
-    subsample=0.8,
-    colsample_bytree=0.8,
-    use_label_encoder=False,
-    eval_metric="mlogloss"
-)
-model.fit(X_train, y_train)
+# ===== Train với SGDClassifier =====
+model = SGDClassifier(loss="log_loss", max_iter=10)
+# partial_fit cần danh sách classes
+classes = np.array([-1, 0, 1])
+model.partial_fit(X_train, y_train, classes=classes)
 
 print("Train acc:", model.score(X_train, y_train))
 print("Test acc:", model.score(X_test, y_test))
 
-# ===== Save model =====
+# ===== Lưu model =====
 joblib.dump(model, "ai_model.pkl")
-print("✅ AI model đã lưu vào ai_model.pkl")
+print("✅ Model online đã được lưu vào ai_model.pkl")
