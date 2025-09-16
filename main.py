@@ -13,7 +13,7 @@ import os
 import math
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
-from sklearn.linear_ai_model import SGDClassifier
+from sklearn.linear_model import SGDClassifier
 import joblib
 from train_ai import train_from_binance
 # Cấu hình logging chi tiết
@@ -1466,6 +1466,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
