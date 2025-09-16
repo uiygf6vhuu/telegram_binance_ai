@@ -532,7 +532,7 @@ class IndicatorBot:
         
         if os.path.exists(model_path):
             # Load model đã có
-            self.model = joblib.load(model_path)
+            self.ai_model = joblib.load(model_path)
         else:
             # Nếu chưa có thì train mới
             print(f"⚡ Chưa có model cho {self.symbol}, đang train...")
@@ -543,7 +543,7 @@ class IndicatorBot:
                 os.rename("ai_model.pkl", model_path)
         
             # Load model vừa tạo
-            self.model = joblib.load(model_path)
+            self.ai_model = joblib.load(model_path)
             print(f"✅ Model cho {self.symbol} đã được tạo và load")
 
         # Phần khởi tạo khác giữ nguyên
@@ -749,13 +749,13 @@ class IndicatorBot:
         else:
             return None
 
-    def update_model(self, data):
+    def update_ai_model(self, data):
         """
         Học thêm từ dữ liệu nến mới:
         - Tính RSI, EMA, ATR, Volume
         - Tạo nhãn theo biến động giá trong 3 nến tới
-        - Cập nhật model bằng partial_fit
-        - Lưu lại model vào file
+        - Cập nhật ai_model bằng partial_fit
+        - Lưu lại ai_model vào file
         """
         try:
             closes = [float(k[4]) for k in data]
@@ -783,7 +783,7 @@ class IndicatorBot:
     
             self.ai_model.partial_fit(features, [label])
     
-            # Lưu model lại
+            # Lưu ai_model lại
             joblib.dump(self.ai_model, f"models/ai_{self.symbol}.pkl")
             self.log(f"🤖 AI model đã học thêm (label={label})")
     
@@ -1466,6 +1466,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
