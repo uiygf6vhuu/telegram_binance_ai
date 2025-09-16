@@ -1,3 +1,4 @@
+# train_ai.py
 import pandas as pd
 import numpy as np
 import requests
@@ -46,35 +47,37 @@ def calc_atr(df, period=14):
     atr = tr.rolling(period).mean()
     return atr
 
-# ===== Chuẩn bị dữ liệu =====
-df = fetch_klines("BTCUSDT", "5m", 1000)
-df["RSI"] = calc_rsi(df["close"], 14)
-df["EMA9"] = calc_ema(df["close"], 9)
-df["EMA21"] = calc_ema(df["close"], 21)
-df["ATR"] = calc_atr(df, 14)
+# ===== Train model từ Binance =====
+def train_from_binance(symbol="BTCUSDT"):
+    df = fetch_klines(symbol, "5m", 1000)
+    df["RSI"] = calc_rsi(df["close"], 14)
+    df["EMA9"] = calc_ema(df["close"], 9)
+    df["EMA21"] = calc_ema(df["close"], 21)
+    df["ATR"] = calc_atr(df, 14)
 
-# Label: dự đoán biến động giá 3 nến tới
-future_return = df["close"].shift(-3) / df["close"] - 1
-df["label"] = 0
-df.loc[future_return > 0.003, "label"] = 1    # BUY
-df.loc[future_return < -0.003, "label"] = -1  # SELL
+    # Label: dự đoán biến động giá 3 nến tới
+    future_return = df["close"].shift(-3) / df["close"] - 1
+    df["label"] = 0
+    df.loc[future_return > 0.003, "label"] = 1    # BUY
+    df.loc[future_return < -0.003, "label"] = -1  # SELL
 
-df = df.dropna()
+    df = df.dropna()
+    X = df[["RSI","EMA9","EMA21","ATR","volume"]]
+    y = df["label"]
 
-X = df[["RSI","EMA9","EMA21","ATR","volume"]]
-y = df["label"]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
+    # Train online model
+    model = SGDClassifier(loss="log_loss", max_iter=10)
+    classes = np.array([-1, 0, 1])
+    model.partial_fit(X_train, y_train, classes=classes)
 
-# ===== Train với SGDClassifier =====
-model = SGDClassifier(loss="log_loss", max_iter=10)
-# partial_fit cần danh sách classes
-classes = np.array([-1, 0, 1])
-model.partial_fit(X_train, y_train, classes=classes)
+    print("Train acc:", model.score(X_train, y_train))
+    print("Test acc:", model.score(X_test, y_test))
 
-print("Train acc:", model.score(X_train, y_train))
-print("Test acc:", model.score(X_test, y_test))
+    # Lưu model
+    joblib.dump(model, "ai_model.pkl")
+    print("✅ Model đã lưu vào ai_model.pkl")
 
-# ===== Lưu model =====
-joblib.dump(model, "ai_model.pkl")
-print("✅ Model online đã được lưu vào ai_model.pkl")
+if __name__ == "__main__":
+    train_from_binance("BTCUSDT")
