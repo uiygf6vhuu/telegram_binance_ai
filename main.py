@@ -712,7 +712,8 @@ class IndicatorBot:
             if None in [rsi, ema_fast, ema_slow, atr]:
                 return None
     
-            features = np.array([rsi, ema_fast, ema_slow, atr, volumes[-1]]).reshape(1, -1)
+            features = pd.DataFrame([[rsi, ema_fast, ema_slow, atr, volume]],
+                        columns=["RSI","EMA9","EMA21","ATR","volume"])
     
             # AI dự đoán
             signal = self.ai_model.predict(features)[0]  # -1 SELL, 0 NEUTRAL, 1 BUY
@@ -1466,6 +1467,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
