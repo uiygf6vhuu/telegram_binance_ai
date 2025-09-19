@@ -315,17 +315,6 @@ class WebSocketManager:
         self.callbacks = {}
         self.retry_count = {}
 
-    def _is_valid_symbol(self, symbol):
-        try:
-            url = "https://fapi.binance.com/fapi/v1/exchangeInfo"
-            data = binance_api_request(url)
-            if not data:
-                return False
-            return any(s['symbol'] == symbol.upper() for s in data['symbols'])
-        except Exception as e:
-            logger.error(f"Lỗi check symbol {symbol}: {e}")
-            return False
-
     def _on_message(self, ws, message, symbol):
         data = json.loads(message)
         if symbol in self.callbacks:
@@ -336,17 +325,15 @@ class WebSocketManager:
 
     def _on_close(self, ws, close_status_code, close_msg, symbol):
         logger.info(f"WebSocket đóng {symbol}: {close_status_code} - {close_msg}")
+        # Chỉ reconnect khi thật sự cần, có delay và giới hạn
         self._reconnect(symbol, self.callbacks.get(symbol))
 
     def _on_open(self, ws, symbol):
-        logger.info(f"Websocket connected {symbol}")
-        self.retry_count[symbol] = 0  # reset retry khi kết nối thành công
+        logger.info(f"WebSocket connected {symbol}")
+        # Reset lại retry khi thành công
+        self.retry_count[symbol] = 0
 
     def _create_connection(self, symbol, callback):
-        if not self._is_valid_symbol(symbol):
-            logger.error(f"❌ Symbol {symbol} không hợp lệ, bỏ qua không tạo WebSocket.")
-            return
-
         url = f"wss://fstream.binance.com/ws/{symbol.lower()}@kline_1m"
         ws = websocket.WebSocketApp(
             url,
@@ -377,13 +364,15 @@ class WebSocketManager:
 
     def _reconnect(self, symbol, callback):
         self.retry_count[symbol] = self.retry_count.get(symbol, 0) + 1
+
+        # Giới hạn số lần retry
         if self.retry_count[symbol] > 5:
             logger.error(f"❌ Symbol {symbol} lỗi quá 5 lần, dừng reconnect.")
             send_telegram(f"⚠️ Symbol {symbol} lỗi quá nhiều lần, dừng reconnect.")
             return
 
         logger.info(f"Kết nối lại WebSocket cho {symbol}, lần thử {self.retry_count[symbol]}")
-        time.sleep(3)  # delay để tránh spam connect
+        time.sleep(3)  # delay tránh spam
         self.remove_symbol(symbol)
         self._create_connection(symbol, callback)
 
@@ -1050,6 +1039,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
