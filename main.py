@@ -314,9 +314,9 @@ class ProbabilityBot:
         low_prices = self.historical_data['low'].values.reshape(-1, 1)
         if len(high_prices) < 5 or len(low_prices) < 5: return
         kmeans_high = KMeans(n_clusters=5, random_state=42, n_init=10).fit(high_prices)
-        self.resistance_levels = sorted([float(center) for center in kmeans_high.cluster_centers_])
+        self.resistance_levels = sorted([float(center[0]) for center in kmeans_high.cluster_centers_])
         kmeans_low = KMeans(n_clusters=5, random_state=42, n_init=10).fit(low_prices)
-        self.support_levels = sorted([float(center) for center in kmeans_low.cluster_centers_])
+        self.support_levels = sorted([float(center[0]) for center in kmeans_low.cluster_centers_])
     
     def calculate_probability_features(self, current_price):
         if not self.support_levels or not self.resistance_levels: return None
@@ -707,4 +707,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
