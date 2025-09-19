@@ -311,75 +311,67 @@ def calc_macd(series, fast_period=12, slow_period=26, signal_period=9):
 # ========== QUẢN LÝ WEBSOCKET HIỆU QUẢ VỚI KIỂM SOÁT LỖI ==========
 class WebSocketManager:
     def __init__(self):
-        self.sockets = {}
-        self.callbacks = {}
-        self.retry_count = {}
-
-    def _on_message(self, ws, message, symbol):
-        data = json.loads(message)
-        if symbol in self.callbacks:
-            self.callbacks[symbol](data)
-
-    def _on_error(self, ws, error, symbol):
-        logger.error(f"Lỗi WebSocket {symbol}: {error}")
-
-    def _on_close(self, ws, close_status_code, close_msg, symbol):
-        logger.info(f"WebSocket đóng {symbol}: {close_status_code} - {close_msg}")
-        # Chỉ reconnect khi thật sự cần, có delay và giới hạn
-        self._reconnect(symbol, self.callbacks.get(symbol))
-
-    def _on_open(self, ws, symbol):
-        logger.info(f"WebSocket connected {symbol}")
-        # Reset lại retry khi thành công
-        self.retry_count[symbol] = 0
-
-    def _create_connection(self, symbol, callback):
-        url = f"wss://fstream.binance.com/ws/{symbol.lower()}@kline_1m"
-        ws = websocket.WebSocketApp(
-            url,
-            on_message=lambda ws, msg: self._on_message(ws, msg, symbol),
-            on_error=lambda ws, err: self._on_error(ws, err, symbol),
-            on_close=lambda ws, code, msg: self._on_close(ws, code, msg, symbol),
-            on_open=lambda ws: self._on_open(ws, symbol)
-        )
-        self.sockets[symbol] = ws
-        self.callbacks[symbol] = callback
-
-        thread = threading.Thread(target=ws.run_forever, daemon=True)
-        thread.start()
-        logger.info(f"WebSocket bắt đầu cho {symbol}")
+        self.connections = {}
+        self.executor = ThreadPoolExecutor(max_workers=10)
+        self._lock = threading.Lock()
+        self._stop_event = threading.Event()
 
     def add_symbol(self, symbol, callback):
-        self.retry_count[symbol] = 0
-        self._create_connection(symbol, callback)
+        symbol = symbol.upper()
+        with self._lock:
+            if symbol not in self.connections:
+                self._create_connection(symbol, callback)
 
-    def remove_symbol(self, symbol):
-        if symbol in self.sockets:
+    def _create_connection(self, symbol, callback):
+        if self._stop_event.is_set():
+            return
+        stream = f"{symbol.lower()}@trade"
+        url = f"wss://fstream.binance.com/ws/{stream}"
+        def on_message(ws, message):
             try:
-                self.sockets[symbol].close()
+                data = json.loads(message)
+                if 'p' in data:
+                    price = float(data['p'])
+                    self.executor.submit(callback, price)
             except Exception as e:
-                logger.error(f"Lỗi đóng WebSocket {symbol}: {str(e)}")
-            del self.sockets[symbol]
-            logger.info(f"WebSocket đã xóa cho {symbol}")
+                logger.error(f"Lỗi xử lý tin nhắn WebSocket {symbol}: {str(e)}")
+        def on_error(ws, error):
+            logger.error(f"Lỗi WebSocket {symbol}: {str(error)}")
+            if not self._stop_event.is_set():
+                time.sleep(5)
+                self._reconnect(symbol, callback)
+        def on_close(ws, close_status_code, close_msg):
+            logger.info(f"WebSocket đóng {symbol}: {close_status_code} - {close_msg}")
+            if not self._stop_event.is_set() and symbol in self.connections:
+                time.sleep(5)
+                self._reconnect(symbol, callback)
+        ws = websocket.WebSocketApp(url, on_message=on_message, on_error=on_error, on_close=on_close)
+        thread = threading.Thread(target=ws.run_forever, daemon=True)
+        thread.start()
+        self.connections[symbol] = {'ws': ws, 'thread': thread, 'callback': callback}
+        logger.info(f"WebSocket bắt đầu cho {symbol}")
 
     def _reconnect(self, symbol, callback):
-        self.retry_count[symbol] = self.retry_count.get(symbol, 0) + 1
-
-        # Giới hạn số lần retry
-        if self.retry_count[symbol] > 5:
-            logger.error(f"❌ Symbol {symbol} lỗi quá 5 lần, dừng reconnect.")
-            send_telegram(f"⚠️ Symbol {symbol} lỗi quá nhiều lần, dừng reconnect.")
-            return
-
-        logger.info(f"Kết nối lại WebSocket cho {symbol}, lần thử {self.retry_count[symbol]}")
-        time.sleep(3)  # delay tránh spam
+        logger.info(f"Kết nối lại WebSocket cho {symbol}")
         self.remove_symbol(symbol)
         self._create_connection(symbol, callback)
 
-    def stop(self):
-        for symbol in list(self.sockets.keys()):
-            self.remove_symbol(symbol)
+    def remove_symbol(self, symbol):
+        symbol = symbol.upper()
+        with self._lock:
+            if symbol in self.connections:
+                try:
+                    self.connections[symbol]['ws'].close()
+                except Exception as e:
+                    logger.error(f"Lỗi đóng WebSocket {symbol}: {str(e)}")
+                del self.connections[symbol]
+                logger.info(f"WebSocket đã xóa cho {symbol}")
 
+    def stop(self):
+        self._stop_event.set()
+        for symbol in list(self.connections.keys()):
+            self.remove_symbol(symbol)
+            
 # ========== LỚP TẠO TÍN HIỆU DỰA TRÊN XÁC SUẤT ==========
 class ProbabilityBot:
     def __init__(self, symbol):
@@ -566,9 +558,9 @@ class IndicatorBot:
             prob_signal, prob_confidence = self.prob_bot.get_probability_signal(current_price)
             
             # Kết hợp và lọc tín hiệu
-            if (ai_prediction == 1 or prob_signal == "BUY") and prob_confidence > 0.7 and ai_prediction != -1 and prob_signal != "SELL":
+            if ai_prediction == 1 and prob_signal == "BUY" and prob_confidence > 0.7:
                 return "BUY"
-            if (ai_prediction == -1 or prob_signal == "SELL") and prob_confidence > 0.7 and ai_prediction != 1 and prob_signal != "BUY":
+            if ai_prediction == -1 and prob_signal == "SELL" and prob_confidence > 0.7:
                 return "SELL"
             
             return None
@@ -1039,8 +1031,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
