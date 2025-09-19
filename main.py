@@ -558,9 +558,9 @@ class IndicatorBot:
             prob_signal, prob_confidence = self.prob_bot.get_probability_signal(current_price)
             
             # Kết hợp và lọc tín hiệu
-            if ai_prediction == 1 and prob_signal == "BUY" and prob_confidence > 0.7:
+            if (ai_prediction == 1 or prob_signal == "BUY") and prob_confidence > 0.7 and ai_prediction == -1 and prob_signal != "SELL":
                 return "BUY"
-            if ai_prediction == -1 and prob_signal == "SELL" and prob_confidence > 0.7:
+            if (ai_prediction == -1 or prob_signal == "SELL") and prob_confidence > 0.7 and ai_prediction != 1 and prob_signal != "BUY":
                 return "SELL"
             
             return None
@@ -1031,3 +1031,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
