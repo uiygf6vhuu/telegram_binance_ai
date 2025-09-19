@@ -311,67 +311,86 @@ def calc_macd(series, fast_period=12, slow_period=26, signal_period=9):
 # ========== QUẢN LÝ WEBSOCKET HIỆU QUẢ VỚI KIỂM SOÁT LỖI ==========
 class WebSocketManager:
     def __init__(self):
-        self.connections = {}
-        self.executor = ThreadPoolExecutor(max_workers=10)
-        self._lock = threading.Lock()
-        self._stop_event = threading.Event()
+        self.sockets = {}
+        self.callbacks = {}
+        self.retry_count = {}
 
-    def add_symbol(self, symbol, callback):
-        symbol = symbol.upper()
-        with self._lock:
-            if symbol not in self.connections:
-                self._create_connection(symbol, callback)
+    def _is_valid_symbol(self, symbol):
+        try:
+            url = "https://fapi.binance.com/fapi/v1/exchangeInfo"
+            data = binance_api_request(url)
+            if not data:
+                return False
+            return any(s['symbol'] == symbol.upper() for s in data['symbols'])
+        except Exception as e:
+            logger.error(f"Lỗi check symbol {symbol}: {e}")
+            return False
+
+    def _on_message(self, ws, message, symbol):
+        data = json.loads(message)
+        if symbol in self.callbacks:
+            self.callbacks[symbol](data)
+
+    def _on_error(self, ws, error, symbol):
+        logger.error(f"Lỗi WebSocket {symbol}: {error}")
+
+    def _on_close(self, ws, close_status_code, close_msg, symbol):
+        logger.info(f"WebSocket đóng {symbol}: {close_status_code} - {close_msg}")
+        self._reconnect(symbol, self.callbacks.get(symbol))
+
+    def _on_open(self, ws, symbol):
+        logger.info(f"Websocket connected {symbol}")
+        self.retry_count[symbol] = 0  # reset retry khi kết nối thành công
 
     def _create_connection(self, symbol, callback):
-        if self._stop_event.is_set():
+        if not self._is_valid_symbol(symbol):
+            logger.error(f"❌ Symbol {symbol} không hợp lệ, bỏ qua không tạo WebSocket.")
             return
-        stream = f"{symbol.lower()}@trade"
-        url = f"wss://fstream.binance.com/ws/{stream}"
-        def on_message(ws, message):
-            try:
-                data = json.loads(message)
-                if 'p' in data:
-                    price = float(data['p'])
-                    self.executor.submit(callback, price)
-            except Exception as e:
-                logger.error(f"Lỗi xử lý tin nhắn WebSocket {symbol}: {str(e)}")
-        def on_error(ws, error):
-            logger.error(f"Lỗi WebSocket {symbol}: {str(error)}")
-            if not self._stop_event.is_set():
-                time.sleep(5)
-                self._reconnect(symbol, callback)
-        def on_close(ws, close_status_code, close_msg):
-            logger.info(f"WebSocket đóng {symbol}: {close_status_code} - {close_msg}")
-            if not self._stop_event.is_set() and symbol in self.connections:
-                time.sleep(5)
-                self._reconnect(symbol, callback)
-        ws = websocket.WebSocketApp(url, on_message=on_message, on_error=on_error, on_close=on_close)
+
+        url = f"wss://fstream.binance.com/ws/{symbol.lower()}@kline_1m"
+        ws = websocket.WebSocketApp(
+            url,
+            on_message=lambda ws, msg: self._on_message(ws, msg, symbol),
+            on_error=lambda ws, err: self._on_error(ws, err, symbol),
+            on_close=lambda ws, code, msg: self._on_close(ws, code, msg, symbol),
+            on_open=lambda ws: self._on_open(ws, symbol)
+        )
+        self.sockets[symbol] = ws
+        self.callbacks[symbol] = callback
+
         thread = threading.Thread(target=ws.run_forever, daemon=True)
         thread.start()
-        self.connections[symbol] = {'ws': ws, 'thread': thread, 'callback': callback}
         logger.info(f"WebSocket bắt đầu cho {symbol}")
 
-    def _reconnect(self, symbol, callback):
-        logger.info(f"Kết nối lại WebSocket cho {symbol}")
-        self.remove_symbol(symbol)
+    def add_symbol(self, symbol, callback):
+        self.retry_count[symbol] = 0
         self._create_connection(symbol, callback)
 
     def remove_symbol(self, symbol):
-        symbol = symbol.upper()
-        with self._lock:
-            if symbol in self.connections:
-                try:
-                    self.connections[symbol]['ws'].close()
-                except Exception as e:
-                    logger.error(f"Lỗi đóng WebSocket {symbol}: {str(e)}")
-                del self.connections[symbol]
-                logger.info(f"WebSocket đã xóa cho {symbol}")
+        if symbol in self.sockets:
+            try:
+                self.sockets[symbol].close()
+            except Exception as e:
+                logger.error(f"Lỗi đóng WebSocket {symbol}: {str(e)}")
+            del self.sockets[symbol]
+            logger.info(f"WebSocket đã xóa cho {symbol}")
+
+    def _reconnect(self, symbol, callback):
+        self.retry_count[symbol] = self.retry_count.get(symbol, 0) + 1
+        if self.retry_count[symbol] > 5:
+            logger.error(f"❌ Symbol {symbol} lỗi quá 5 lần, dừng reconnect.")
+            send_telegram(f"⚠️ Symbol {symbol} lỗi quá nhiều lần, dừng reconnect.")
+            return
+
+        logger.info(f"Kết nối lại WebSocket cho {symbol}, lần thử {self.retry_count[symbol]}")
+        time.sleep(3)
+        self.remove_symbol(symbol)
+        self._create_connection(symbol, callback)
 
     def stop(self):
-        self._stop_event.set()
-        for symbol in list(self.connections.keys()):
+        for symbol in list(self.sockets.keys()):
             self.remove_symbol(symbol)
-            
+
 # ========== LỚP TẠO TÍN HIỆU DỰA TRÊN XÁC SUẤT ==========
 class ProbabilityBot:
     def __init__(self, symbol):
@@ -1031,5 +1050,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
