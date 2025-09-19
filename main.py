@@ -398,14 +398,20 @@ class IndicatorBot:
             df_ai = pd.DataFrame(binance_api_request(f"https://fapi.binance.com/fapi/v1/klines?symbol={self.symbol}&interval=5m&limit=100"), columns=["open_time","open","high","low","close","volume","close_time","quote_asset_volume","number_of_trades","taker_buy_base","taker_buy_quote","ignore"]).astype({"close": float, "high": float, "low": float, "volume": float})
             if df_ai.empty or len(df_ai) < 50: return None
             closes = df_ai["close"].tolist(); highs = df_ai["high"].tolist(); lows = df_ai["low"].tolist(); volumes = df_ai["volume"].tolist()
-            rsi = calc_rsi(df_ai["close"], 14); ema_fast = calc_ema(df_ai["close"], 9); ema_slow = calc_ema(df_ai["close"], 21)
+            rsi = calc_rsi(df_ai["close"], 14)
+            ema_fast = calc_ema(df_ai["close"], 9)
+            ema_slow = calc_ema(df_ai["close"], 21)
             atr = calc_atr(df_ai, 14).iloc[-1]
             macd, macd_signal, macd_hist = calc_macd(df_ai["close"])
             macd = macd.iloc[-1]
             macd_signal = macd_signal.iloc[-1]
             macd_hist = macd_hist.iloc[-1]
-            if any(pd.isna([rsi, ema_fast, ema_slow, atr, macd, macd_signal, macd_hist])):
+            volume = df_ai["volume"].iloc[-1]
+            
+            # Nếu có bất kỳ NaN hoặc None thì bỏ
+            if any(pd.isna([rsi, ema_fast, ema_slow, atr, macd, macd_signal, macd_hist, volume])):
                 return None
+
 
             if None in [rsi, ema_fast, ema_slow, atr, macd, macd_signal, macd_hist]: return None
             
@@ -701,3 +707,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
