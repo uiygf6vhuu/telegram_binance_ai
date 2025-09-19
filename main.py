@@ -383,7 +383,7 @@ class WebSocketManager:
             return
 
         logger.info(f"Kết nối lại WebSocket cho {symbol}, lần thử {self.retry_count[symbol]}")
-        time.sleep(3)
+        time.sleep(3)  # delay để tránh spam connect
         self.remove_symbol(symbol)
         self._create_connection(symbol, callback)
 
@@ -1050,6 +1050,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
