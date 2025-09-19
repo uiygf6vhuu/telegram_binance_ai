@@ -1,4 +1,3 @@
-# main.py
 import json
 import hmac
 import hashlib
@@ -40,6 +39,56 @@ BINANCE_SECRET_KEY = os.getenv('BINANCE_SECRET_KEY', '')
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '')
     
+# Cấu hình bot từ biến môi trường (dạng JSON)
+bot_config_json = os.getenv('BOT_CONFIGS', '[]')
+try:
+    BOT_CONFIGS = json.loads(bot_config_json)
+except Exception as e:
+    logging.error(f"Lỗi phân tích cấu hình BOT_CONFIGS: {e}")
+    BOT_CONFIGS = []
+
+API_KEY = BINANCE_API_KEY
+API_SECRET = BINANCE_SECRET_KEY
+# main.py
+import json
+import hmac
+import hashlib
+import time
+import threading
+import urllib.request
+import urllib.parse
+import numpy as np
+import websocket
+import logging
+import requests
+import os
+import math
+import pandas as pd
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
+import joblib
+from train_ai import train_from_binance
+from scipy import stats
+from sklearn.cluster import KMeans
+
+# Cấu hình logging chi tiết
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(module)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('bot_errors.log')
+    ]
+)
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+# Lấy cấu hình từ biến môi trường
+BINANCE_API_KEY = os.getenv('BINANCE_API_KEY', '')
+BINANCE_SECRET_KEY = os.getenv('BINANCE_SECRET_KEY', '')
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '')
+TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '')
+
 # Cấu hình bot từ biến môi trường (dạng JSON)
 bot_config_json = os.getenv('BOT_CONFIGS', '[]')
 try:
@@ -215,10 +264,13 @@ class WebSocketManager:
         if self._stop_event.is_set(): return
         stream = f"{symbol.lower()}@trade"; url = f"wss://fstream.binance.com/ws/{stream}"
         def on_message(ws, message):
-            try: 
-                data = json.loads(message);
-                if 'p' in data: price = float(data['p']); self.executor.submit(callback, price)
-            except Exception as e: logger.error(f"Lỗi xử lý tin nhắn WebSocket {symbol}: {str(e)}")
+            try:
+                data = json.loads(message)
+                if 'p' in data:
+                    price = float(data['p'])
+                    self.executor.submit(callback, price)
+            except Exception as e:
+                logger.error(f"Lỗi xử lý tin nhắn WebSocket {symbol}: {str(e)}")
         def on_error(ws, error):
             logger.error(f"Lỗi WebSocket {symbol}: {str(error)}");
             if not self._stop_event.is_set(): time.sleep(5); self._reconnect(symbol, callback)
@@ -233,8 +285,7 @@ class WebSocketManager:
         symbol = symbol.upper();
         with self._lock:
             if symbol in self.connections:
-                try: 
-                    self.connections[symbol]['ws'].close()
+                try: self.connections[symbol]['ws'].close()
                 except Exception as e: logger.error(f"Lỗi đóng WebSocket {symbol}: {str(e)}")
                 del self.connections[symbol]; logger.info(f"WebSocket đã xóa cho {symbol}")
     def stop(self): self._stop_event.set(); [self.remove_symbol(symbol) for symbol in list(self.connections.keys())]
@@ -391,12 +442,16 @@ class IndicatorBot:
             except Exception as e:
                 if time.time() - self.last_error_log_time > 10: self.log(f"Lỗi hệ thống: {str(e)}"); self.last_error_log_time = time.time()
                 time.sleep(1)
-    def stop(self): self._stop = True; self.ws_manager.remove_symbol(self.symbol);
-    try: 
-        cancel_all_orders(self.symbol)
-    except Exception as e:
-        if time.time() - self.last_error_log_time > 10: self.log(f"Lỗi hủy lệnh: {str(e)}"); self.last_error_log_time = time.time()
-    self.log(f"🔴 Bot dừng cho {self.symbol}")
+    def stop(self):
+        self._stop = True
+        self.ws_manager.remove_symbol(self.symbol)
+        try:
+            cancel_all_orders(self.symbol)
+        except Exception as e:
+            if time.time() - self.last_error_log_time > 10:
+                self.log(f"Lỗi hủy lệnh: {str(e)}")
+                self.last_error_log_time = time.time()
+        self.log(f"🔴 Bot dừng cho {self.symbol}")
     def check_position_status(self):
         try:
             positions = get_positions(self.symbol);
@@ -526,38 +581,62 @@ class BotManager:
         user_state = self.user_states.get(chat_id, {}); current_step = user_state.get('step')
         if current_step == 'waiting_symbol':
             if text == '❌ Hủy bỏ': self.user_states[chat_id] = {}; send_telegram("❌ Đã hủy thêm bot", chat_id, create_menu_keyboard())
-            else: symbol = text.upper(); self.user_states[chat_id] = {'step': 'waiting_leverage', 'symbol': symbol}; send_telegram(f"Chọn đòn bẩy cho {symbol}:", chat_id, create_leverage_keyboard())
+            else:
+                symbol = text.upper()
+                self.user_states[chat_id] = {'step': 'waiting_leverage', 'symbol': symbol}
+                send_telegram(f"Chọn đòn bẩy cho {symbol}:", chat_id, create_leverage_keyboard())
         elif current_step == 'waiting_leverage':
             if text == '❌ Hủy bỏ': self.user_states[chat_id] = {}; send_telegram("❌ Đã hủy thêm bot", chat_id, create_menu_keyboard())
-            elif 'x' in text: leverage = int(text.replace('', '').replace('x', '').strip()); user_state['leverage'] = leverage; user_state['step'] = 'waiting_percent'; send_telegram(f"📌 Cặp: {user_state['symbol']}\n Đòn bẩy: {leverage}x\n\nNhập % số dư muốn sử dụng (1-100):", chat_id, create_cancel_keyboard())
+            elif 'x' in text:
+                leverage = int(text.replace('', '').replace('x', '').strip())
+                user_state['leverage'] = leverage
+                user_state['step'] = 'waiting_percent'
+                send_telegram(f"📌 Cặp: {user_state['symbol']}\n Đòn bẩy: {leverage}x\n\nNhập % số dư muốn sử dụng (1-100):", chat_id, create_cancel_keyboard())
         elif current_step == 'waiting_percent':
             if text == '❌ Hủy bỏ': self.user_states[chat_id] = {}; send_telegram("❌ Đã hủy thêm bot", chat_id, create_menu_keyboard())
             else:
-                try: 
-                    percent = float(text);
-                    if 1 <= percent <= 100: user_state['percent'] = percent; user_state['step'] = 'waiting_tp'; send_telegram(f"📌 Cặp: {user_state['symbol']}\n ĐB: {user_state['leverage']}x\n📊 %: {percent}%\n\nNhập % Take Profit (ví dụ: 10):", chat_id, create_cancel_keyboard())
-                    else: send_telegram("⚠️ Vui lòng nhập % từ 1-100", chat_id)
-                except: send_telegram("⚠️ Giá trị không hợp lệ, vui lòng nhập số", chat_id)
+                try:
+                    percent = float(text)
+                    if 1 <= percent <= 100:
+                        user_state['percent'] = percent
+                        user_state['step'] = 'waiting_tp'
+                        send_telegram(f"📌 Cặp: {user_state['symbol']}\n ĐB: {user_state['leverage']}x\n📊 %: {percent}%\n\nNhập % Take Profit (ví dụ: 10):", chat_id, create_cancel_keyboard())
+                    else:
+                        send_telegram("⚠️ Vui lòng nhập % từ 1-100", chat_id)
+                except Exception:
+                    send_telegram("⚠️ Giá trị không hợp lệ, vui lòng nhập số", chat_id)
         elif current_step == 'waiting_tp':
             if text == '❌ Hủy bỏ': self.user_states[chat_id] = {}; send_telegram("❌ Đã hủy thêm bot", chat_id, create_menu_keyboard())
             else:
-                try: 
-                    tp = float(text);
-                    if tp > 0: user_state['tp'] = tp; user_state['step'] = 'waiting_sl'; send_telegram(f"📌 Cặp: {user_state['symbol']}\n ĐB: {user_state['leverage']}x\n📊 %: {user_state['percent']}%\n🎯 TP: {tp}%\n\nNhập % Stop Loss (ví dụ: 5):", chat_id, create_cancel_keyboard())
-                    else: send_telegram("⚠️ TP phải lớn hơn 0", chat_id)
-                except: send_telegram("⚠️ Giá trị không hợp lệ, vui lòng nhập số", chat_id)
+                try:
+                    tp = float(text)
+                    if tp > 0:
+                        user_state['tp'] = tp
+                        user_state['step'] = 'waiting_sl'
+                        send_telegram(f"📌 Cặp: {user_state['symbol']}\n ĐB: {user_state['leverage']}x\n📊 %: {user_state['percent']}%\n🎯 TP: {tp}%\n\nNhập % Stop Loss (ví dụ: 5):", chat_id, create_cancel_keyboard())
+                    else:
+                        send_telegram("⚠️ TP phải lớn hơn 0", chat_id)
+                except Exception:
+                    send_telegram("⚠️ Giá trị không hợp lệ, vui lòng nhập số", chat_id)
         elif current_step == 'waiting_sl':
             if text == '❌ Hủy bỏ': self.user_states[chat_id] = {}; send_telegram("❌ Đã hủy thêm bot", chat_id, create_menu_keyboard())
             else:
-                try: 
-                    sl = float(text);
+                try:
+                    sl = float(text)
                     if sl >= 0:
-                        symbol = user_state['symbol']; leverage = user_state['leverage']; percent = user_state['percent']; tp = user_state['tp']
-                        if self.add_bot(symbol, leverage, percent, tp, sl, "AI"): send_telegram(f"✅ <b>ĐÃ THÊM BOT THÀNH CÔNG</b>\n\n" f"📌 Cặp: {symbol}\n" f" Đòn bẩy: {leverage}x\n" f"📊 % Số dư: {percent}%\n" f"🎯 TP: {tp}%\n" f"🛡️ SL: {sl}%", chat_id, create_menu_keyboard())
-                        else: send_telegram("❌ Không thể thêm bot, vui lòng kiểm tra log", chat_id, create_menu_keyboard())
+                        symbol = user_state['symbol']
+                        leverage = user_state['leverage']
+                        percent = user_state['percent']
+                        tp = user_state['tp']
+                        if self.add_bot(symbol, leverage, percent, tp, sl, "AI"):
+                            send_telegram(f"✅ <b>ĐÃ THÊM BOT THÀNH CÔNG</b>\n\n" f"📌 Cặp: {symbol}\n" f" Đòn bẩy: {leverage}x\n" f"📊 % Số dư: {percent}%\n" f"🎯 TP: {tp}%\n" f"🛡️ SL: {sl}%", chat_id, create_menu_keyboard())
+                        else:
+                            send_telegram("❌ Không thể thêm bot, vui lòng kiểm tra log", chat_id, create_menu_keyboard())
                         self.user_states[chat_id] = {}
-                    else: send_telegram("⚠️ SL phải lớn hơn 0", chat_id)
-                except: send_telegram("⚠️ Giá trị không hợp lệ, vui lòng nhập số", chat_id)
+                    else:
+                        send_telegram("⚠️ SL phải lớn hơn 0", chat_id)
+                except Exception:
+                    send_telegram("⚠️ Giá trị không hợp lệ, vui lòng nhập số", chat_id)
         elif text == "📊 Danh sách Bot":
             if not self.bots: send_telegram("🤖 Không có bot nào đang chạy", chat_id)
             else: message = "🤖 <b>DANH SÁCH BOT ĐANG CHẠY</b>\n\n";
@@ -577,8 +656,7 @@ class BotManager:
             if symbol in self.bots: self.stop_bot(symbol); send_telegram(f"⛔ Đã gửi lệnh dừng bot {symbol}", chat_id, create_menu_keyboard())
             else: send_telegram(f"⚠️ Không tìm thấy bot {symbol}", chat_id, create_menu_keyboard())
         elif text == "💰 Số dư tài khoản":
-            try: 
-                balance = get_balance(); send_telegram(f"💰 <b>SỐ DƯ KHẢ DỤNG</b>: {balance:.2f} USDT", chat_id)
+            try: balance = get_balance(); send_telegram(f"💰 <b>SỐ DƯ KHẢ DỤNG</b>: {balance:.2f} USDT", chat_id)
             except Exception as e: send_telegram(f"⚠️ Lỗi lấy số dư: {str(e)}", chat_id)
         elif text == "📈 Vị thế đang mở":
             try:
@@ -603,8 +681,7 @@ def main():
     if BOT_CONFIGS:
         for config in BOT_CONFIGS: manager.add_bot(*config)
     else: manager.log("⚠️ Không có cấu hình bot nào được tìm thấy!")
-    try: 
-        balance = get_balance(); manager.log(f"💰 SỐ DƯ BAN ĐẦU: {balance:.2f} USDT")
+    try: balance = get_balance(); manager.log(f"💰 SỐ DƯ BAN ĐẦU: {balance:.2f} USDT")
     except Exception as e: manager.log(f"⚠️ Lỗi lấy số dư ban đầu: {str(e)}")
     try:
         while manager.running: time.sleep(1)
@@ -616,4 +693,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
