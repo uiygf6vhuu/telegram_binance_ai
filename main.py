@@ -536,7 +536,7 @@ class BotManager:
                 try: 
                     percent = float(text);
                     if 1 <= percent <= 100: user_state['percent'] = percent; user_state['step'] = 'waiting_tp'; send_telegram(f"📌 Cặp: {user_state['symbol']}\n ĐB: {user_state['leverage']}x\n📊 %: {percent}%\n\nNhập % Take Profit (ví dụ: 10):", chat_id, create_cancel_keyboard())
-                else: send_telegram("⚠️ Vui lòng nhập % từ 1-100", chat_id)
+                    else: send_telegram("⚠️ Vui lòng nhập % từ 1-100", chat_id)
                 except: send_telegram("⚠️ Giá trị không hợp lệ, vui lòng nhập số", chat_id)
         elif current_step == 'waiting_tp':
             if text == '❌ Hủy bỏ': self.user_states[chat_id] = {}; send_telegram("❌ Đã hủy thêm bot", chat_id, create_menu_keyboard())
@@ -616,3 +616,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
