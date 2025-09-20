@@ -326,22 +326,10 @@ class WebSocketManager:
     def _create_connection(self, symbol, callback):
         if self._stop_event.is_set():
             return
-            
+    
         stream = f"{symbol.lower()}@trade"
         url = f"wss://fstream.binance.com/ws/{stream}"
-        ssl_ctx = ssl.create_default_context()
-        
-        thread = threading.Thread(
-            target=lambda: ws.run_forever(
-                ping_interval=20,
-                ping_timeout=10,
-                sslopt={"context": ssl_ctx}
-            ),
-            daemon=True
-        )
-        thread.start()
-
-        
+    
         def on_message(ws, message):
             try:
                 data = json.loads(message)
@@ -350,29 +338,38 @@ class WebSocketManager:
                     self.executor.submit(callback, price)
             except Exception as e:
                 logger.error(f"Lỗi xử lý tin nhắn WebSocket {symbol}: {str(e)}")
-                
+    
         def on_error(ws, error):
             logger.error(f"Lỗi WebSocket {symbol}: {str(error)}")
             if not self._stop_event.is_set():
-                time.sleep(300)
+                time.sleep(5)
                 self._reconnect(symbol, callback)
-            
+    
         def on_close(ws, close_status_code, close_msg):
             logger.info(f"WebSocket đóng {symbol}: {close_status_code} - {close_msg}")
             if not self._stop_event.is_set() and symbol in self.connections:
-                time.sleep(300)
+                time.sleep(5)
                 self._reconnect(symbol, callback)
-                
+    
+        ssl_ctx = ssl.create_default_context()
+    
         ws = websocket.WebSocketApp(
             url,
             on_message=on_message,
             on_error=on_error,
             on_close=on_close
         )
-        
-        thread = threading.Thread(target=ws.run_forever, daemon=True)
+    
+        def _run_ws():
+            ws.run_forever(
+                ping_interval=20,
+                ping_timeout=10,
+                sslopt={"context": ssl_ctx}
+            )
+    
+        thread = threading.Thread(target=_run_ws, daemon=True)
         thread.start()
-        
+    
         self.connections[symbol] = {
             'ws': ws,
             'thread': thread,
@@ -1060,6 +1057,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
