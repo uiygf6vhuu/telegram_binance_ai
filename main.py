@@ -341,13 +341,13 @@ class WebSocketManager:
         def on_error(ws, error):
             logger.error(f"Lỗi WebSocket {symbol}: {str(error)}")
             if not self._stop_event.is_set():
-                time.sleep(5)
+                time.sleep(300)
                 self._reconnect(symbol, callback)
             
         def on_close(ws, close_status_code, close_msg):
             logger.info(f"WebSocket đóng {symbol}: {close_status_code} - {close_msg}")
             if not self._stop_event.is_set() and symbol in self.connections:
-                time.sleep(5)
+                time.sleep(300)
                 self._reconnect(symbol, callback)
                 
         ws = websocket.WebSocketApp(
@@ -574,9 +574,9 @@ class IndicatorBot:
             prob_signal, prob_confidence = self.prob_bot.get_probability_signal(current_price)
             
             # Kết hợp và lọc tín hiệu
-            if (ai_prediction == 1 or prob_signal == "BUY") and prob_confidence > 0.7 and ai_prediction != -1 and prob_signal != "SELL":
+            if (ai_prediction == 1 or prob_signal == "BUY") and prob_confidence > 0.7 :# and ai_prediction != -1 and prob_signal != "SELL":
                 return "BUY"
-            if (ai_prediction == -1 or prob_signal == "SELL") and prob_confidence > 0.7 and ai_prediction != 1 and prob_signal != "BUY":
+            if (ai_prediction == -1 or prob_signal == "SELL") and prob_confidence > 0.7 :#and ai_prediction != 1 and prob_signal != "BUY":
                 return "SELL"
             
             return None
@@ -1047,5 +1047,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
