@@ -1,3 +1,4 @@
+import ssl
 import json
 import hmac
 import hashlib
@@ -328,6 +329,18 @@ class WebSocketManager:
             
         stream = f"{symbol.lower()}@trade"
         url = f"wss://fstream.binance.com/ws/{stream}"
+        ssl_ctx = ssl.create_default_context()
+        
+        thread = threading.Thread(
+            target=lambda: ws.run_forever(
+                ping_interval=20,
+                ping_timeout=10,
+                sslopt={"context": ssl_ctx}
+            ),
+            daemon=True
+        )
+        thread.start()
+
         
         def on_message(ws, message):
             try:
@@ -1047,6 +1060,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
