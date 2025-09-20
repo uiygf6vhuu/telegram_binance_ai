@@ -309,26 +309,26 @@ def calc_macd(series, fast_period=12, slow_period=26, signal_period=9):
         return pd.Series([None]), pd.Series([None]), pd.Series([None])
 
 # ========== QUẢN LÝ WEBSOCKET HIỆU QUẢ VỚI KIỂM SOÁT LỖI ==========
-# ========== QUẢN LÝ WEBSOCKET HIỆU QUẢ VỚI KIỂM SOÁT LỖI ==========
 class WebSocketManager:
     def __init__(self):
         self.connections = {}
         self.executor = ThreadPoolExecutor(max_workers=10)
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
-
+        
     def add_symbol(self, symbol, callback):
         symbol = symbol.upper()
         with self._lock:
             if symbol not in self.connections:
                 self._create_connection(symbol, callback)
-
+                
     def _create_connection(self, symbol, callback):
         if self._stop_event.is_set():
             return
+            
         stream = f"{symbol.lower()}@trade"
         url = f"wss://fstream.binance.com/ws/{stream}"
-
+        
         def on_message(ws, message):
             try:
                 data = json.loads(message)
@@ -337,54 +337,52 @@ class WebSocketManager:
                     self.executor.submit(callback, price)
             except Exception as e:
                 logger.error(f"Lỗi xử lý tin nhắn WebSocket {symbol}: {str(e)}")
-
+                
         def on_error(ws, error):
             logger.error(f"Lỗi WebSocket {symbol}: {str(error)}")
-            if not self._stop_event.is_set() and self.connections.get(symbol, {}).get('is_active'):
+            if not self._stop_event.is_set():
                 time.sleep(5)
                 self._reconnect(symbol, callback)
-
+            
         def on_close(ws, close_status_code, close_msg):
-            # Chỉ cố gắng kết nối lại nếu bot vẫn đang hoạt động
-            if self.connections.get(symbol, {}).get('is_active'):
-                logger.info(f"WebSocket đóng {symbol}: {close_status_code} - {close_msg}")
+            logger.info(f"WebSocket đóng {symbol}: {close_status_code} - {close_msg}")
+            if not self._stop_event.is_set() and symbol in self.connections:
                 time.sleep(5)
                 self._reconnect(symbol, callback)
-            else:
-                logger.info(f"WebSocket đóng {symbol}: {close_status_code} - {close_msg} (Đã yêu cầu đóng)")
-
-        ws = websocket.WebSocketApp(url, on_message=on_message, on_error=on_error, on_close=on_close)
+                
+        ws = websocket.WebSocketApp(
+            url,
+            on_message=on_message,
+            on_error=on_error,
+            on_close=on_close
+        )
+        
         thread = threading.Thread(target=ws.run_forever, daemon=True)
         thread.start()
-
+        
         self.connections[symbol] = {
             'ws': ws,
             'thread': thread,
-            'callback': callback,
-            'is_active': True  # Đánh dấu kết nối đang hoạt động
+            'callback': callback
         }
         logger.info(f"WebSocket bắt đầu cho {symbol}")
-
+        
     def _reconnect(self, symbol, callback):
         logger.info(f"Kết nối lại WebSocket cho {symbol}")
-        # Đặt lại is_active thành False để ngăn vòng lặp đóng/mở
-        self.connections[symbol]['is_active'] = False
         self.remove_symbol(symbol)
         self._create_connection(symbol, callback)
-
+        
     def remove_symbol(self, symbol):
         symbol = symbol.upper()
         with self._lock:
             if symbol in self.connections:
                 try:
-                    # Đánh dấu kết nối là không hoạt động trước khi đóng
-                    self.connections[symbol]['is_active'] = False
                     self.connections[symbol]['ws'].close()
                 except Exception as e:
                     logger.error(f"Lỗi đóng WebSocket {symbol}: {str(e)}")
                 del self.connections[symbol]
                 logger.info(f"WebSocket đã xóa cho {symbol}")
-
+                
     def stop(self):
         self._stop_event.set()
         for symbol in list(self.connections.keys()):
@@ -576,9 +574,9 @@ class IndicatorBot:
             prob_signal, prob_confidence = self.prob_bot.get_probability_signal(current_price)
             
             # Kết hợp và lọc tín hiệu
-            if ai_prediction == 1 and prob_signal == "BUY" and prob_confidence > 0.7:
+            if (ai_prediction == 1 or prob_signal == "BUY") and prob_confidence > 0.7 and ai_prediction != -1 and prob_signal != "SELL":
                 return "BUY"
-            if ai_prediction == -1 and prob_signal == "SELL" and prob_confidence > 0.7:
+            if (ai_prediction == -1 or prob_signal == "SELL") and prob_confidence > 0.7 and ai_prediction != 1 and prob_signal != "BUY":
                 return "SELL"
             
             return None
@@ -1049,4 +1047,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
