@@ -626,9 +626,9 @@ class IndicatorBot:
             prob_signal, prob_confidence = self.prob_bot.get_probability_signal(current_price)
             
             # Combine and filter signals
-            if (ai_prediction == 1 or prob_signal == "BUY") and prob_confidence > 0.5:
+            if (ai_prediction == 1 and prob_signal == "BUY") or prob_confidence > 0.5:
                 return "BUY"
-            if (ai_prediction == -1 or prob_signal == "SELL") and prob_confidence > 0.5:
+            if (ai_prediction == -1 and prob_signal == "SELL") or prob_confidence > 0.5:
                 return "SELL"
             
             return None
@@ -1099,5 +1099,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
